@@ -1,41 +1,1396 @@
-# Compiled Lua sources
-luac.out
+repeat task.wait(1) until game:IsLoaded()
 
-# luarocks build files
-*.src.rock
-*.zip
-*.tar.gz
+    --[[ Define Services ]]--
 
-# Object files
-*.o
-*.os
-*.ko
-*.obj
-*.elf
+    local Services = setmetatable({}, {
+        __index = function(self, service)
+            return game:GetService(service)
+        end
+    })
 
-# Precompiled Headers
-*.gch
-*.pch
+    local Workspace = Services.Workspace
+    local Players = Services.Players
+    local Teams = Services.Teams
+    local HttpService = Services.HttpService
+    local Lighting = Services.Lighting
+    local ReplicatedStorage = Services.ReplicatedStorage
+    local PathfindingService = Services.PathfindingService
+    local CollectionService = Services.CollectionService
+    local RunService = Services.RunService
+    local MarketplaceService = Services.MarketplaceService
+    local TeleportService = Services.TeleportService
+    local CoreGui = Services.CoreGui
 
-# Libraries
-*.lib
-*.a
-*.la
-*.lo
-*.def
-*.exp
+    --[[ Define Player ]]--
 
-# Shared objects (inc. Windows DLLs)
-*.dll
-*.so
-*.so.*
-*.dylib
+    local Player = Players.LocalPlayer
+    local Char = nil
+    local Root = nil
+    local Hum = nil
 
-# Executables
-*.exe
-*.out
-*.app
-*.i*86
-*.x86_64
-*.hex
+    --[[ Define Workspace Variables ]]--
 
+    local Camera = Workspace.CurrentCamera
+    local Vehicles = Workspace.Vehicles
+    local VehicleSpawns = Workspace.VehicleSpawns
+    local Terrain = Workspace.Terrain
+
+    --[[ Define Misc Variables ]]--
+
+    local RobberyMoneyGui = Player.PlayerGui:WaitForChild("RobberyMoneyGui")
+    local BagLabel = RobberyMoneyGui.Container.Bottom.Progress.Amount
+    local NotificationGui = Player.PlayerGui.NotificationGui
+    local NotificationMessage = NotificationGui.ContainerNotification.Message
+    local TeleportParams = RaycastParams.new()
+    local DoorPositions = {}
+
+    local MoneyMade, RunTime = 0, 0
+    local ServerStartMoney = Player:WaitForChild("leaderstats"):WaitForChild("Money").Value
+    local queued = false
+    local queue = ""
+
+	local function FormatCash(number)
+        local totalnum = tostring(number):split("")
+        
+        if #totalnum == 7 then
+            return totalnum[1].."."..totalnum[2].."M"
+        elseif #totalnum >= 10 then
+            return totalnum[1].."."..totalnum[2].."B"
+        elseif #totalnum == 4 and #totalnum[2] == 0 then
+            return totalnum[1].."k"
+        elseif #totalnum == 4  then
+            return totalnum[1].."."..totalnum[2].."k"
+        elseif #totalnum == 5  then
+            return totalnum[1]..totalnum[2].."."..totalnum[3].."k"
+        elseif #totalnum == 6  then
+            return totalnum[1]..totalnum[2]..totalnum[3].."k"
+        else
+            return number
+        end
+    end
+    
+    local function Teleport()
+        if queued == false then
+            queued = true
+
+            queue = queue .. " getgenv().StartingMoney = " .. getgenv().StartingMoney
+            queue = queue .. " getgenv().StartingTime = " .. getgenv().StartingTime
+            -- queue = queue .. " script_key = '" .. script_key .. "'"
+
+            if syn then
+                syn.queue_on_teleport(queue)
+            else
+                queue_on_teleport(queue)
+            end
+
+            local ThisEarnings = 0
+            pcall(function()
+                ThisEarnings = Player.leaderstats.Money.Value - ServerStartMoney
+            end)
+            warn("You made $" .. FormatCash(ThisEarnings))
+            if ThisEarnings ~= 0 then
+                task.spawn(function()
+                    --[[
+                        ignoreCash = game:HttpGet("https://r.autorob.xyz/researchcollector/logstats?money=" .. FormatCash(ThisEarnings))
+                    })--]]
+                end)
+	        end
+        end
+        
+        while true do
+            local Servers = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
+            local Server, Next = nil, nil
+            
+            local function ListServers(cursor)
+                local Raw = game:HttpGet(Servers .. ((cursor and "&cursor="..cursor) or ""))
+                
+                return HttpService:JSONDecode(Raw)
+            end
+            
+            repeat
+                local Servers = ListServers(Next)
+                Server = Servers.data[math.random(1, (#Servers.data / 3))]
+                Next = Servers.nextPageCursor
+            until Server
+            
+            if Server.playing < Server.maxPlayers and Server.id ~= game.JobId then
+				warn(pcall(function()
+	                TeleportService:TeleportToPlaceInstance(game.PlaceId, Server.id, Player)
+	            end))
+            end
+            
+            task.wait(10)
+        end
+    end
+
+    local IsLoaded = false
+    task.delay(5, function()
+        if not IsLoaded then
+            Teleport()
+        end
+    end)
+
+    CoreGui.RobloxPromptGui.promptOverlay.ChildAdded:Connect(function(child)
+        if child.Name == 'ErrorPrompt' and child:FindFirstChild('MessageArea') and child.MessageArea:FindFirstChild("ErrorFrame") then
+            Teleport()
+        end
+    end)
+
+    if not getgenv().StartingMoney then
+        getgenv().StartingMoney = Player.leaderstats.Money.Value 
+    end
+    if not getgenv().StartingTime then
+        getgenv().StartingTime = os.time()
+    end
+
+    pcall(function()
+        MoneyMade = Player:WaitForChild("leaderstats"):WaitForChild("Money").Value - getgenv().StartingMoney
+    end)
+    pcall(function()
+        RunTime = os.time() - getgenv().StartingTime
+    end)
+
+    --[[ Create Interface ]]--
+
+    local function CreateInstance(type, parent, data)
+        local createdInstance = Instance.new(type)
+            
+        for index, value in next, data do
+            createdInstance[index] = value
+        end
+            
+        createdInstance.Parent = parent
+        
+        return createdInstance
+    end
+
+    local FarmUI = CreateInstance("ScreenGui", gethui(), {
+        Name = "FarmHub"
+    })
+
+    local holder = CreateInstance("ImageLabel", FarmUI, {
+        Name = "holder",
+        BackgroundTransparency = 1.000,
+        Position = UDim2.new(0.0506075993, 0, 0.655761302, 0),
+        Size = UDim2.new(0, 278, 0, 145),
+        Image = "rbxassetid://4928857387",
+        ImageColor3 = Color3.fromRGB(90, 168, 196)
+    })
+
+    local title = CreateInstance("TextLabel", holder, {
+        Name = "title",
+        AnchorPoint = Vector2.new(0.5, 0),
+        BackgroundTransparency = 1.000,
+        Position = UDim2.new(0.5, 0, 0.0500000007, 0),
+        Size = UDim2.new(0, 200, 0, 26),
+        Font = Enum.Font.SourceSansBold,
+        Text = "FarmHub Drop Farm",
+        TextColor3 = Color3.fromRGB(255, 255, 255),
+        TextScaled = true,
+        TextSize = 14.000,
+        TextWrapped = true
+    })
+
+    local stats = CreateInstance("TextLabel", holder, {
+        Name = "stats",
+        AnchorPoint = Vector2.new(0.5, 0),
+        BackgroundTransparency = 1.000,
+        Position = UDim2.new(0.5, 0, 0.229310349, 0),
+        Size = UDim2.new(0, 260, 0, 34),
+        Font = Enum.Font.SourceSansBold,
+        Text = "Loading, Please wait..",
+        TextColor3 = Color3.fromRGB(255, 255, 255),
+        TextSize = 15.500,
+        TextWrapped = true
+    })
+
+    local status = CreateInstance("TextLabel", holder, {
+        Name = "status",
+        AnchorPoint = Vector2.new(0.5, 0),
+        BackgroundColor3 = Color3.fromRGB(17, 32, 37),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.new(0, 239, 0, 34),
+        Font = Enum.Font.SourceSansBold,
+        Text = "   Loading..",
+        TextColor3 = Color3.fromRGB(255, 255, 255),
+        TextSize = 20.000,
+        TextXAlignment = Enum.TextXAlignment.Left
+    })
+
+    local uicorner = CreateInstance("UICorner", status, {
+        CornerRadius = UDim.new(0, 10)
+    })
+
+    local uistroke = CreateInstance("UIStroke", status, {
+        ApplyStrokeMode = "Border",
+        Color = Color3.fromRGB(67, 125, 146),
+        Thickness = 3,
+    })
+
+    local invite = CreateInstance("TextLabel", holder, {
+        Name = "invite",
+        AnchorPoint = Vector2.new(0.5, 0),
+        BackgroundTransparency = 1.000,
+        Position = UDim2.new(0.5, 0, 0.75, 0),
+        Size = UDim2.new(0, 248, 0, 34),
+        Font = Enum.Font.SourceSansBold,
+        Text = "",
+        TextColor3 = Color3.fromRGB(255, 255, 255),
+        TextSize = 15.000,
+        TextWrapped = true
+    })
+
+    --[[ Define Module Variables ]]--
+
+    local Modules = {
+        Vehicle = require(ReplicatedStorage.Vehicle.VehicleUtils),
+        TeamChooseUI = require(ReplicatedStorage.Game.TeamChooseUI),
+        SidebarUI = require(ReplicatedStorage.Game.SidebarUI),
+        DefaultActions = require(ReplicatedStorage.Game.DefaultActions),
+        ItemSystem = require(ReplicatedStorage.Game.ItemSystem.ItemSystem),
+        GunItem = require(ReplicatedStorage.Game.Item.Gun),
+        PlayerUtils = require(ReplicatedStorage.Game.PlayerUtils),
+        Paraglide = require(ReplicatedStorage.Game.Paraglide),
+        CharUtils = require(ReplicatedStorage.Game.CharacterUtil),
+        Notification = require(ReplicatedStorage.Game.Notification),
+        PuzzleFlow = require(game.ReplicatedStorage.Game.Robbery.PuzzleFlow),
+        Heli = require(ReplicatedStorage.Game.Vehicle.Heli),
+        Raycast = require(ReplicatedStorage.Module.RayCast),
+        UI = require(ReplicatedStorage.Module.UI),
+        GunShopUI = require(ReplicatedStorage.Game.GunShop.GunShopUI),
+        GunShopUtils = require(ReplicatedStorage.Game.GunShop.GunShopUtils),
+        AlexChassis = require(ReplicatedStorage.Module.AlexChassis),
+        Store = require(ReplicatedStorage.App.store),
+        TagUtils = require(ReplicatedStorage.Tag.TagUtils),
+        RobberyConsts = require(ReplicatedStorage.Robbery.RobberyConsts),
+        NpcShared = require(ReplicatedStorage.GuardNPC.GuardNPCShared),
+        Npc = require(ReplicatedStorage.NPC.NPC),
+        SafeConsts = require(ReplicatedStorage.Safes.SafesConsts),
+        MansionUtils = require(ReplicatedStorage.MansionRobbery.MansionRobberyUtils),
+        BossConsts = require(ReplicatedStorage.MansionRobbery.BossNPCConsts),
+        BulletEmitter = require(ReplicatedStorage.Game.ItemSystem.BulletEmitter),
+    }
+        
+    --[[ Define Module Functions ]]--
+
+    local SysRequest = getupvalue(Modules.AlexChassis.SetEvent, 1)
+    local GetVehicleModel = Modules.Vehicle.GetLocalVehicleModel
+    local GetVehiclePacket = Modules.Vehicle.GetLocalVehiclePacket
+    local RobberyState = ReplicatedStorage.RobberyState
+    local GarageSpawnCar = ReplicatedStorage.GarageSpawnVehicle
+    local SendChat = ReplicatedStorage.DefaultChatSystemChatEvents.SayMessageRequest
+
+    --[[ Catch Errors ]]--
+
+    if not isfile("FarmHubErrors2.txt") then
+        writefile("FarmHubErrors2.txt", "Script Errors:")
+    end
+
+    --[[ Bypass Anticheat ]]--
+
+    local OverwriteCnt = 0
+    local ExitFunc = nil 
+        
+    LPH_NO_VIRTUALIZE(function()
+        for i, v in pairs(getgc(true)) do
+            if typeof(v) =="function" then
+                if debug.info(v, "n"):match("CheatCheck") then
+                    hookfunction(v, function() end)
+                end
+            end
+
+            if typeof(v) == "function" and getfenv(v).script == Player.PlayerScripts.LocalScript then
+                local con = getconstants(v)
+                if table.find(con, "LastVehicleExit") and table.find(con, "tick") then
+                    ExitFunc = v
+                end
+            end
+        end
+    end)()
+
+    --[[ Auto Grab Hashes ]]--
+
+    local Hashes = {
+        ExitCar = "",
+        Punch = "",
+        JoinTeam = "",
+        SwitchTeam = "",
+        DropRope = "",
+    }
+
+    local KeysList = getupvalue(getupvalue(SysRequest.FireServer, 1), 3)
+    local KeyFunctions = {}
+    local BlacklistedConstants = {}
+    local keyCache = {}
+
+    for index, value in next, getrenv() do
+        if index ~= "_G" and index ~= "shared" and typeof(value) == "table" then
+            for name in next, value do
+                table.insert(BlacklistedConstants, name)
+            end
+        end
+    end
+
+    local function fetchKey(callerFunction, keyIndex)
+        keyIndex = keyIndex or 1
+            
+        if keyCache[callerFunction] then
+            local correctKey = keyCache[callerFunction][keyIndex]
+            return correctKey and correctKey[1] or "Failed to fetch key"
+        end
+            
+        local constants = getconstants(callerFunction)
+            
+        local prefixIndexes = {}
+        local foundKeys = {}
+        local constantCharacters = {}
+            
+        for index, constant in next, constants do
+            if KeysList[constant] then 
+                table.insert(foundKeys, { constant, 0 })
+                
+                constants[index] = nil
+            elseif typeof(constant) ~= "string" or constant == "" or constant:match("%u") or constant:match("%W") or table.find(BlacklistedConstants, constant) then
+                constants[index] = nil
+            else
+                for character in constant:gmatch("(%w)") do
+                    table.insert(constantCharacters, character)
+                end
+            end
+        end
+            
+        for key, remote in next, KeysList do
+            local prefixPassed, prefixIndex = false
+            local keyLength = #key
+                
+            for index, constant in next, constants do
+                local constantLength = #constant
+
+                if not prefixPassed and key:sub(1, constantLength) == constant then
+                    prefixPassed, prefixIndex = constant, index
+                elseif prefixPassed and key:sub(keyLength - (constantLength - 1), keyLength) == constant then
+                    local currentConstantCharacters = table.clone(constantCharacters)
+                    local charactersValid = true
+
+                    for character in key:gmatch("(%w)") do
+                        if not table.find(currentConstantCharacters, character) then
+                            charactersValid = false
+                                
+                            break
+                        end
+                ShouldStop = true
+                Signal:Disconnect()
+            end
+        }
+    end
+
+    local function NoclipStart()
+        local NoclipLoop = LPH_NO_VIRTUALIZE(function()
+            pcall(function()
+                for i, child in pairs(Char:GetDescendants()) do
+                    if child:IsA("BasePart") and child.CanCollide == true then
+                        child.CanCollide = false
+                    end
+                end
+            end)
+        end)
+
+        local Noclipper = RunService.Stepped:Connect(NoclipLoop)
+            
+        return {
+            Stop = function()
+                Noclipper:Disconnect()
+            end
+        }
+    end
+
+    local function ExitCar()
+        ExitFunc()
+
+        repeat
+            task.wait(0.1)
+        until not GetVehiclePacket()
+    end
+
+    local function SmallTP(cframe, speed)
+        if not Char or not Root or IsArrested() then
+            return false
+        end
+
+        if speed == nil then
+            speed = 70
+        end
+            
+        local IsTargetMoving = type(cframe) == "function"
+        local LagCheck = LagBackCheck(Root)
+        local Noclip = NoclipStart()
+        local TargetPos = (IsTargetMoving and cframe() or cframe).Position
+        local LagbackCount = 0
+        local Success = true
+
+        local Mover = Instance.new("BodyVelocity", Root)
+        Mover.P = 3000
+        Mover.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+
+        repeat
+            if not Root or Hum.Health == 0 or IsArrested() then
+                Success = false
+            else
+                TargetPos = (IsTargetMoving and cframe() or cframe).Position
+                Mover.Velocity = CFrame.new(Root.Position, TargetPos).LookVector * speed
+
+                Hum:SetStateEnabled("Running", false)
+                Hum:SetStateEnabled("Climbing", false)
+                    
+                task.wait(0.03) 
+                    
+                if LaggedBack then
+                    LagbackCount = LagbackCount + 1
+                    Mover.Velocity = Vector3.zero
+                    task.wait(1)
+
+                    if LagbackCount == 4 then
+                        Mover:Destroy()
+                        Noclip:Stop()
+                        LagCheck:Stop()
+
+                        Hum.Health = 0
+                        Success = false
+                        task.wait(5)
+                    end
+                end
+            end
+        until (Root.Position - TargetPos).Magnitude <= 5 or not Success
+
+        if Success then
+            Mover.Velocity = Vector3.new(0, 0, 0)
+            TargetPos = (IsTargetMoving and cframe() or cframe).Position
+            Root.CFrame = CFrame.new(TargetPos)
+            task.wait(0.001)
+
+            Hum:SetStateEnabled("Running", true)
+            Hum:SetStateEnabled("Climbing", true)
+                    
+            Mover:Destroy()
+            Noclip:Stop()
+            LagCheck:Stop()
+        end
+
+        return Success
+    end
+
+    local function FindDoor(tried)
+        local Distance, Nearest, tried = math.huge, nil, tried or {}
+
+        for _, Position in pairs(DoorPositions) do
+            if not table.find(tried, Position) then
+                local Magnitude = (Position - Root.Position).Magnitude
+
+                if Magnitude < Distance then
+                    Distance = Magnitude
+                    Nearest = Position
+                end
+            end
+        end
+
+        local RenderedPath = PathfindingService:CreatePath({WaypointSpacing = 5})
+        RenderedPath:ComputeAsync(Root.Position, Nearest)
+
+        if RenderedPath.Status == Enum.PathStatus.Success then
+            local waypoints = RenderedPath:GetWaypoints()
+
+            for i, waypoint in pairs(waypoints) do       
+                if not SmallTP(CFrame.new(waypoint.Position + Vector3.new(0, 3.5, 0)), 40) then return end
+
+                if not CheckRaycast(Root.Position + Vector3.new(0, 5, 0), Vector3.new(0, 1000, 0)) then
+                    return true
+                end
+            end
+        end
+
+        if not CheckRaycast(Root.Position + Vector3.new(0, 5, 0), Vector3.new(0, 1000, 0)) then
+            return true
+        end
+
+        return FindDoor(tried)
+    end
+local function BigTP(cframe, speed)
+        if not Char or not Root or IsArrested() then
+            return false
+        end
+                
+        if speed == nil then
+            speed = 100
+        end
+
+        local IsTargetMoving = type(cframe) == "function"
+            
+        if DistanceXZ(Root.Position, (IsTargetMoving and cframe() or cframe).Position) < 20 then
+            Root.CFrame = CFrame.new((IsTargetMoving and cframe() or cframe).Position)
+            return true
+        end
+                
+        if CheckRaycast(Root.Position + Vector3.new(0, 5, 0), Vector3.new(0, 1000, 0)) then
+            FindDoor()
+            task.wait(0.5)
+        end
+
+        local LagCheck = LagBackCheck(Root)
+        local Noclip = NoclipStart()
+        local TargetPos = (IsTargetMoving and cframe() or cframe).Position
+        local TargetOffset = Vector3.new(TargetPos.X, 500, TargetPos.Z)
+        local LagbackCount = 0
+        local Success = true
+
+        local Mover = Instance.new("BodyVelocity", Root)
+        Mover.P = 3000
+        Mover.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+
+        repeat
+            if not Root or Hum.Health == 0 or IsArrested() then
+                Success = false
+            else
+                TargetPos = (IsTargetMoving and cframe() or cframe).Position
+                TargetOffset = Vector3.new(TargetPos.X, 500, TargetPos.Z)
+                        
+                Root.CFrame = CFrame.new(Root.CFrame.X, 500, Root.CFrame.Z)
+                Mover.Velocity = (TargetOffset - Root.Position).Unit * speed
+
+                task.wait(0.03) 
+                        
+                if LaggedBack then
+                    LagbackCount = LagbackCount + 1
+                    Mover.Velocity = Vector3.zero
+                    task.wait(1)
+
+                    if CheckRaycast(Root.Position + Vector3.new(0, 5, 0), Vector3.new(0, 1000, 0)) then
+                        FindDoor()
+                        task.wait(0.5)
+                    end
+
+                    if LagbackCount == 10 then
+                        Mover:Destroy()
+                        Noclip:Stop()
+                        LagCheck:Stop()
+                        Hum.Health = 0
+                        Success = false
+                        task.wait(5)
+                    end
+                end
+            end
+
+            if GetVehiclePacket() then
+                Mover.Velocity = Vector3.zero
+                ExitFunc()
+                repeat task.wait() until not GetVehiclePacket()
+            end
+        until not Success or DistanceXZ(Root.Position, TargetOffset) < 15
+
+        if Success then
+            Mover.Velocity = Vector3.new(0, 0, 0)
+            TargetPos = (IsTargetMoving and cframe() or cframe).Position
+            Root.CFrame = CFrame.new(TargetPos)
+            task.wait(0.05)
+
+            Mover:Destroy()
+            Noclip:Stop()
+            LagCheck:Stop()
+
+            task.wait(0.6)
+            if (Root.Position - TargetPos).Magnitude > 30 then
+                return BigTP(cframe, speed)
+            end
+        end
+
+        return Success
+    end
+
+    local function HideCar()
+        if GetVehiclePacket() then
+            LPH_NO_VIRTUALIZE(function()
+                for _, v in pairs(GetVehicleModel():GetDescendants()) do
+                    pcall(function()
+                        v.CanCollide = false
+                    end)
+                end
+            end)()
+        end
+    end
+
+    local function IsCarLock()
+        local Success, Result = pcall(function()
+            return Player.PlayerGui.AppUI.Speedometer.Top.Lock.Icon.Image
+        end)
+
+        if Success then
+            return Result ~= "rbxassetid://5928936296"
+        end
+    end
+
+    local function LockCar()
+        if GetVehiclePacket() and not IsCarLock() then
+            Modules.Vehicle.toggleLocalLocked()
+        end
+    end
+
+    local function EnterCar()
+        if not Char or not Root or IsArrested() then
+            return false
+        end
+
+
+        local OwnedHelis = {"Camaro", "Jeep", "Heli"}
+        local OtherHelis = {"LittleBird"}    
+        
+        for i, v in pairs(Modules.Store._state.garageOwned.Vehicles) do
+            if table.find(OtherHelis, i) then
+                table.insert(OwnedHelis, i)
+            end
+        end
+
+        if GetVehiclePacket() and table.find(OwnedHelis, GetVehicleModel().Name) then
+            HideCar()
+            return true
+        else
+            ExitFunc()
+            repeat task.wait() until not GetVehiclePacket()
+        end
+
+        local SortedCars = Vehicles:GetChildren()
+        table.sort(SortedCars, function(v, v2) 
+            local v3 = v.PrimaryPart or v:FindFirstChildWhichIsA("Part")
+            local v4 = v2.PrimaryPart or v2:FindFirstChildWhichIsA("Part")
+
+            if v3 ~= nil and v4 ~= nil then
+                return DistanceXZ(v3.Position, Root.Position) < DistanceXZ(v4.Position, Root.Position)
+            end
+        end)
+
+        if GetVehiclePacket() and table.find(OwnedHelis, GetVehicleModel().Name) then
+            return GetVehicleModel()
+        end
+
+        for _, v in pairs(SortedCars) do        
+            if v.PrimaryPart ~= nil and v.Seat.PlayerName.Value == "" and table.find(OwnedHelis, v.Name) and not CheckRaycast(v.PrimaryPart.Position, Vector3.new(0, 1000, 0)) then
+                if not BigTP(v.Seat.CFrame + Vector3.new(0, 3, 0)) then return false end
+                local Timeout = tick()
+                repeat
+                    if v.PrimaryPart and v.Seat then
+                        Root.Velocity = Vector3.new(0, 0, 0)
+                        for _, spec in pairs(Modules.UI.CircleAction.Specs) do
+                                if spec.Part == v.Seat then
+                                spec:Callback(true)
+                            end
+                        end
+                    end
+
+                    if DistanceXZ(Root.Position, v.PrimaryPart.Position) > 30 then
+                        if not BigTP(v.Seat.CFrame + Vector3.new(0, 3, 0)) then return false end
+                    end
+
+                    task.wait(0.3)
+                until GetVehiclePacket() or tick() - Timeout > 5
+
+                if GetVehiclePacket() then
+                    HideCar()
+                    return GetVehiclePacket()
+                end
+            end
+        end 
+            
+        return EnterCar()
+    end
+
+    local function CarTP(cframe, exit, speed, offset)
+        if not Char or not Root or IsArrested() then
+            return false
+        end
+
+        if not GetVehiclePacket() then
+            local IsTargetMoving = type(cframe) == "function"
+            local TargetPos = (IsTargetMoving and cframe() or cframe).Position
+
+            if DistanceXZ(Root.Position, TargetPos) < 150 then
+                return BigTP(cframe)
+            end
+
+            if not EnterCar() then
+                return false
+            end
+        end
+
+        speed = (speed or 375)
+        offset = (offset or 380)
+
+        local IsTargetMoving = type(cframe) == "function"
+        local CarModel = GetVehicleModel().PrimaryPart
+        local LagCheck = LagBackCheck(CarModel)
+        local TargetPos = (IsTargetMoving and cframe() or cframe).Position
+        local TargetOffset = Vector3.new(TargetPos.X, offset, TargetPos.Z)
+        local LagbackCount = 0
+        local Success = true
+
+        local Mover = Instance.new("BodyVelocity", Root)
+        Mover.P = 3000
+        Mover.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+
+        repeat
+            if not Root or Hum.Health == 0 or IsArrested() or not GetVehiclePacket() then
+                Success = false
+                Hum.Health = 0
+                Success = false
+                task.wait(5)
+            else
+                TargetPos = (IsTargetMoving and cframe() or cframe).Position
+                TargetOffset = Vector3.new(TargetPos.X, offset, TargetPos.Z)
+                        
+                CarModel.CFrame = CFrame.new(CarModel.CFrame.X, offset, CarModel.CFrame.Z)
+                Mover.Velocity = (TargetOffset - CarModel.Position).Unit * speed
+
+                task.wait(0.03) 
+                if LaggedBack then
+                    LagbackCount = LagbackCount + 1
+                    Mover.Velocity = Vector3.zero
+                    task.wait(1)
+
+                    if LagbackCount == 15 then
+                        Mover:Destroy()
+                        if offset == 500 then
+                            LagCheck:Stop()
+                        end
+
+                        Hum.Health = 0
+                        Success = false
+                        task.wait(5)
+                    end
+                end
+            end
+        until not Success or DistanceXZ(CarModel.Position, TargetOffset) < 15
+
+        if Success then
+            LockCar()
+            Mover.Velocity = Vector3.new(0, 0.01, 0)
+            task.wait(0.01)
+            Mover:Destroy()
+
+            TargetPos = (IsTargetMoving and cframe() or cframe).Position
+            CarModel.CFrame = CFrame.new(TargetPos)
+            task.wait(0.01)
+            LagCheck:Stop()
+
+            if exit then
+                task.wait(0.5)
+                ExitCar()
+            end
+        end
+
+        return Success
+    end
+
+    --[[ Set up Status Functions ]]--
+
+    local function SetStat(stat)
+        status.Text = "   " .. stat
+    end
+
+    local function TickToHM(seconds)
+        local minutes = (seconds - seconds % 60) / 60
+        seconds = seconds - minutes * 60
+        local hours = (minutes - minutes % 60) / 60
+        minutes = minutes - hours * 60
+            
+        return hours .. "h/" .. minutes .. "m"
+    end
+
+    --[[ Set up Farm Functions ]]--
+
+    local function GetClosestAirdrop()
+        if Workspace:FindFirstChild("Drop") then
+            return Workspace:FindFirstChild("Drop")
+        end
+
+        return nil
+    end
+
+    local function GetShipCrate()
+
+    end
+
+    local function DisableMansionAttacks()
+        setreadonly(Modules.bossConsts.ATTACK_STATE._map, false)
+        table.foreach(Modules.bossConsts.ATTACK_STATE._map, function(i, v)
+            if i ~= "None" then
+                Modules.bossConsts.ATTACK_STATE._map[i] = 89 + v
+            end
+        end)	
+        setreadonly(Modules.bossConsts.ATTACK_STATE._map, true)
+    end
+
+
+    local function GetGun()
+        local SetThreadId = (setidentity or set_thread_identity or (syn and syn.set_thread_identity) or setcontext or setthreadcontext or set_thread_context)
+        local IsOpen = pcall(Modules.GunShopUI.open)
+                
+        SetThreadId(2)
+        Modules.GunShopUI.displayList(Modules.GunShopUtils.getCategoryData("Held"))
+        SetThreadId(7)
+
+        repeat 
+            for i, v in next, Modules.GunShopUI.gui.Container.Container.Main.Container.Slider:GetChildren() do
+                if v:IsA("ImageLabel") and v.Name == "Pistol" and (v.Bottom.Action.Text == "FREE" or v.Bottom.Action.Text == "EQUIP") then
+                    firesignal(v.Bottom.Action.MouseButton1Down)
+                end
+            end	
+                    
+            task.wait()
+        until Player.Folder:FindFirstChild("Pistol")
+
+        pcall(Modules.GunShopUI.close)
+    end
+
+    local function EnterHeli()
+        local SortedCars = Vehicles:GetChildren()
+        table.sort(SortedCars, function(v, v2) 
+            local v3 = v.PrimaryPart or v:FindFirstChildWhichIsA("Part")
+            local v4 = v2.PrimaryPart or v2:FindFirstChildWhichIsA("Part")
+
+            if v3 ~= nil and v4 ~= nil then
+                return DistanceXZ(v3.Position, Root.Position) < DistanceXZ(v4.Position, Root.Position)
+            end
+        end)
+
+        local OwnedHelis = {"Heli"}
+        local OtherHelis = {"LittleBird", "EscapeBot"}    
+        for i, v in pairs(Modules.Store._state.garageOwned.Vehicles) do
+            if table.find(OtherHelis, i) then
+                table.insert(OwnedHelis, i)
+            end
+        end
+
+        if GetVehiclePacket() and table.find(OwnedHelis, GetVehicleModel().Name) then
+            return GetVehicleModel()
+        end
+
+        for _, v in pairs(SortedCars) do
+            if v.PrimaryPart ~= nil and v:FindFirstChild("Seat") and v.Seat.PlayerName.Value == "" and table.find(OwnedHelis, v.Name) and not CheckRaycast(v.PrimaryPart.Position, Vector3.new(0, 500, 0)) then
+                if GetVehiclePacket() and table.find(OwnedHelis, GetVehicleModel().Name) then
+                    return GetVehicleModel()
+                end
+
+                if v:GetAttribute("Locked") == true then
+                    continue
+                end
+
+                SetStat("Going to heli..")
+                
+                EnterCar()
+                if GetVehiclePacket() and table.find(OwnedHelis, GetVehicleModel().Name) then
+                    return GetVehicleModel()
+                end
+                
+                if not CarTP(v.Seat.CFrame + Vector3.new(0, 10, 0), true) then return false end
+
+                task.wait(0.5)
+                SetStat("Hijacking heli..")
+
+                for i = 1, 40 do
+                    if v.PrimaryPart and v.Seat then
+                        Root.CFrame = v.Seat.CFrame
+                        Root.Velocity = Vector3.new(0, 0, 0)
+                        for _, spec in pairs(Modules.UI.CircleAction.Specs) do
+                            if spec.Part and spec.Part == v.Seat then
+                                spec:Callback(true)
+                            end
+                        end
+
+                        if GetVehiclePacket() and table.find(OwnedHelis, GetVehicleModel().Name) then
+                            return GetVehicleModel()
+                        end
+                        
+                        if v.Seat.PlayerName.Value ~= "" then
+                            break
+                        end
+                        
+                        task.wait()
+                    end
+                end
+                    
+                task.wait(0.5)
+                if GetVehiclePacket() and table.find(OwnedHelis, GetVehicleModel().Name) then
+                    return GetVehicleModel()
+                end
+            end
+        end 
+            
+        return false
+    end
+
+    local function CheckCargoShip()
+        local TimesRobbed = 0
+
+        for _, message in pairs(Player.PlayerGui:GetDescendants()) do
+            if message:IsA("TextLabel") then
+                if string.find(string.lower(message.Text), "cargo ship") then 
+                    if (string.find(string.lower(message.Text), string.lower(Player.DisplayName))) then
+                        TimesRobbed = TimesRobbed + 1
+                    end
+                end
+            end
+        end
+            
+        return TimesRobbed == 2
+    end
+
+    local function FireTouchInterest(part)
+        if Root then
+            firetouchinterest(part, Root, 1)
+            task.wait()
+            firetouchinterest(part, Root, 0)
+        end
+    end
+
+    local function ShootGun()
+        local currentGun = Modules.ItemSystem.GetLocalEquipped()
+
+        if not currentGun then 
+            return 
+        end
+
+        Modules.GunItem._attemptShoot(currentGun)
+    end
+
+    local function RobAirDrop(drop)  
+        if not drop then
+            return
+        end
+
+        if not drop:GetAttribute("BriefcaseLanded") then
+            SetStat("Waiting for drop..")
+            repeat task.wait() until drop:GetAttribute("BriefcaseLanded") == true
+        end
+
+        SetStat("Going to drop..")
+        if not CarTP(drop.PrimaryPart.CFrame * CFrame.new(15, 10, 0), true) then return end
+        if not drop.PrimaryPart or not GetClosestAirdrop() then return end
+        if not SmallTP(drop.PrimaryPart.CFrame * CFrame.new(0, 5, 0)) then return end
+        if not drop.PrimaryPart or not GetClosestAirdrop() then return end
+        Root.Anchored = true
+        local AirDropY = drop.PrimaryPart.CFrame.Y + 15
+        SetStat("Collecting crate..")
+
+        repeat 
+            if Workspace:FindFirstChild("GuardNPCPlayers") then
+                for i, v in pairs(Workspace.GuardNPCPlayers:GetChildren()) do
+                    v:Remove()
+                end
+            end
+                
+            drop.BriefcasePress:FireServer(false)
+            task.wait(1)
+            drop.BriefcasePress:FireServer(true)
+            drop.BriefcaseCollect:FireServer()
+        until drop:GetAttribute("BriefcaseCollected") == true or not drop.PrimaryPart or not Char or not Root or IsArrested() or not GetClosestAirdrop()
+		Root.Anchored = false
+        if not drop.PrimaryPart or not GetClosestAirdrop() then return end
+        drop.Name = ""
+        repeat task.wait() until Workspace.DroppedCash:GetChildren()[1] ~= nil
+                
+        SetStat("Collecting cash..")
+        for i = 1, 3 do
+            for _, spec in pairs(Modules.UI.CircleAction.Specs) do
+                if spec.Name:sub(1, 8) == "Collect " then
+                    spec:Callback(true)
+                end
+            end
+
+            task.wait(0.5)
+        end
+        
+        task.wait(1)
+    end 
+
+    local function RobCargoShip()        
+        if not EnterHeli() then
+            return false
+        end
+            
+        local Heli = Modules.Vehicle.Classes.Heli
+        local Crate = nil
+        local RopePull = nil
+
+        if GetVehiclePacket() then
+            GetVehicleModel():SetPrimaryPartCFrame(CFrame.new(Root.Position + Vector3.new(0, 100, 0)))
+            SetStat("Releasing rope..")
+            task.wait(0.5)
+            Sys(Hashes.DropRope)
+
+            repeat 
+                task.wait() 
+            until GetVehicleModel():FindFirstChild("Preset") and GetVehicleModel().Preset:FindFirstChild("RopePull")
+                            
+            for i = 1, 10 do
+                
+                pcall(function()
+                    Crate = Workspace.CargoShip.Crates:FindFirstChild("Crate")
+                    RopePull = GetVehicleModel().Preset:FindFirstChild("RopePull")
+                    GetVehicleModel().Winch.RopeConstraint.Length = 10000
+                    RopePull.CanCollide = false
+                    
+                    if Crate == nil then
+                        return
+                    end
+                            
+                    if GetVehiclePacket() then
+                        SetStat("Collecting crate" .. math.random(1, 10) .. "..")
+
+                        repeat
+                            pcall(function()
+                                RopePull.CFrame = Crate.PrimaryPart.CFrame
+                                RopePull.ReqLink:FireServer(Crate, Vector3.zero)
+                            end)
+                        
+                            task.wait()
+                        until RopePull.AttachedTo.Value or not workspace:FindFirstChild("CargoShip") or not workspace.CargoShip.Crates:FindFirstChild("Crate")
+                        
+                        local Timeout = os.time()
+
+                        repeat 
+                            pcall(function()
+                                Crate:SetPrimaryPartCFrame(CFrame.new(-475, -43, 1905))
+                                Crate.PrimaryPart.Velocity, Crate.PrimaryPart.RotVelocity = Vector3.new(), Vector3.new()
+                                task.wait(0.1)
+                                Crate:SetPrimaryPartCFrame(CFrame.new(-475, -53, 1905))
+                                Crate.PrimaryPart.Velocity, Crate.PrimaryPart.RotVelocity = Vector3.new(), Vector3.new()
+                                task.wait(0.1)
+                            end)
+                        until os.time() - Timeout > 2 or not Crate.PrimaryPart
+                        
+                        RopePull.ReqUnlink:FireServer(Crate)
+                    end
+                end)
+
+                if CheckCargoShip() then
+                    break
+                end
+            end
+        end
+        
+        return CheckCargoShip()
+    end
+
+    local function robMansion()
+        if not Player.Folder:FindFirstChild("MansionInvite") then
+            return
+        end
+
+        SetStat("Entering mansion..")
+        ExitCar()
+
+        local MansionRobbery = Workspace.MansionRobbery
+        local TouchToEnter = MansionRobbery.Lobby.EntranceElevator.TouchToEnter
+        local ElevatorDoor = MansionRobbery.ArrivalElevator.Floors:GetChildren()[1].DoorLeft.InnerModel.Door
+        local MansionTeleportCFrame = TouchToEnter.CFrame - Vector3.new(0, TouchToEnter.Size.Y / 2 - Player.Character.Humanoid.HipHeight * 2, -TouchToEnter.Size.Z)
+        
+        local FailMansion = false
+
+        task.delay(10, function()
+            FailMansion = true
+        end)
+
+        repeat
+            Root.CFrame = MansionTeleportCFrame
+            FireTouchInterest(TouchToEnter)
+
+            task.wait()
+        until Modules.MansionUtils.isPlayerInElevator(MansionRobbery, Player) or FailMansion
+
+        if FailMansion then 
+            return
+        end
+
+        GetGun()
+        SetStat("Waiting for mansion..")
+        repeat
+            task.wait(0.1)
+        until ElevatorDoor.Position.X > 3208
+
+        for _, instance in pairs(MansionRobbery.Lasers:GetChildren()) do
+            instance:Remove()
+        end
+        for _, instance in pairs(MansionRobbery.LaserTraps:GetChildren()) do
+            instance:Remove()
+        end   
+        
+        SetStat("Starting mansion..")
+
+        if not SmallTP(CFrame.new(3202, -200, -4703)) then return end
+        if not SmallTP(CFrame.new(3201, -200, -4679)) then return end
+        if not SmallTP(CFrame.new(3106, -204, -4675)) then return end
+        if not SmallTP(CFrame.new(3106, -204, -4647)) then return end
+        if not SmallTP(CFrame.new(3140, -204, -4647)) then return end
+        if not SmallTP(CFrame.new(3147, -204, -4566)) then return end
+
+        repeat task.wait() until MansionRobbery:GetAttribute("MansionRobberyProgressionState") == 3
+        SetStat("Waiting for cutscene..")
+
+        Modules.MansionUtils.getProgressionStateChangedSignal(MansionRobbery):Wait()
+
+        local NPC_new = Modules.Npc.new
+        local NPCShared_goTo = Modules.NpcShared.goTo
+
+		Modules.Npc.new = function(NPCObject, ...)
+		    if NPCObject.Name ~= "ActiveBoss" then
+		        for i,v in pairs(NPCObject:GetDescendants()) do
+		            pcall(function()
+		                v.Transparency = 1
+		            end)
+		        end
+		    end
+		    return NPC_new(NPCObject, ...)
+		end
+		Modules.Npc.GetTarget = function(...)
+		    return MansionRobbery and MansionRobbery:FindFirstChild("ActiveBoss") and MansionRobbery:FindFirstChild("ActiveBoss").HumanoidRootPart
+		end
+		
+		Modules.NpcShared.goTo = function(NPCData, Pos)
+		    if MansionRobbery and MansionRobbery:FindFirstChild("ActiveBoss") then
+		        return NPCShared_goTo(NPCData, MansionRobbery:FindFirstChild("ActiveBoss").HumanoidRootPart.Position)
+		    end
+		end
+		
+		Workspace.Items.DescendantAdded:Connect(function(Des)
+		    if Des:IsA("BasePart") then
+		        Des.Transparency = 1
+		        Des:GetPropertyChangedSignal("Transparency"):Connect(function()
+		            Des.Transparency = 1
+		        end)
+		    end
+		end)
+
+		for i,v in pairs(ReplicatedStorage.Game.Item:GetChildren()) do
+		    require(v).ReloadDropAmmoVisual = function() end
+		    require(v).ReloadDropAmmoSound = function() end
+		    require(v).ReloadRefillAmmoSound = function() end
+		    require(v).ShootSound = function() end
+		end
+		
+		getfenv(Modules.BulletEmitter.Emit).Instance = {
+		    new = function()
+		        return {
+		            Destroy = function() end
+		        }
+		    end
+		}
+
+        local BossCEO = MansionRobbery:WaitForChild("ActiveBoss")
+        local OldHealth = BossCEO.Humanoid.Health
+
+        LPH_NO_VIRTUALIZE(function()
+            Modules.Raycast.RayIgnoreNonCollideWithIgnoreList = function(...)
+                local arg = {RayIgnore(...)}
+                            
+                if (tostring(getfenv(2).script) == "BulletEmitter" or tostring(getfenv(2).script) == "Taser") then
+                    arg[1] = BossCEO.Head
+                    arg[2] = BossCEO.Head.Position
+                end
+
+                return unpack(arg)
+            end
+        end)()
+    
+        require(ReplicatedStorage.NPC.NPC).GetTarget = function()
+            return BossCEO:FindFirstChild("Head")
+        end
+        
+        local Start = os.time()
+        
+
+		while Player.Folder:FindFirstChild("Pistol") and BossCEO and BossCEO:FindFirstChild("HumanoidRootPart") and BossCEO.Humanoid.Health ~= 1 do
+			SetStat("Killing boss.. (" .. tostring(math.round(((BossCEO.Humanoid.Health / OldHealth) * 100) - 100)):gsub("-", "") .. "% done)")
+			Player.Folder.Pistol.InventoryEquipRemote:FireServer(true)
+			task.wait()
+			ShootGun()
+		end
+
+        Modules.Raycast.RayIgnoreNonCollideWithIgnoreList = RayIgnore
+
+        print("Killed bos in " .. Start - os.time())
+        SetStat("Waiting for reward..")
+        Player.Folder.Pistol.InventoryEquipRemote:FireServer(false)
+        repeat task.wait() until Player.PlayerGui.AppUI:FindFirstChild("RewardSpinner")
+    end
+
+    local function WaitForReward()
+        if Player.PlayerGui.AppUI:FindFirstChild("RewardSpinner") then
+            SetStat("Waiting for reward..")
+            repeat 
+                task.wait() 
+            until not Player.PlayerGui.AppUI:FindFirstChild("RewardSpinner")
+        end
+
+        return true
+    end
+
+    local function IsMansionOpen()
+        for i,v in pairs(RobberyState:GetChildren()) do
+            if v.Name == tostring(Modules.RobberyConsts.ENUM_ROBBERY.MANSION) then
+                return (v.Value == 1)
+            end
+        end
+    end
+
+    local function IsShipOpen()
+        for i,v in pairs(RobberyState:GetChildren()) do
+            if v.Name == tostring(Modules.RobberyConsts.ENUM_ROBBERY.CARGO_SHIP) then
+                return (v.Value ~= 3)
+            end
+        end
+    end
+
+    Terrain.WaterWaveSize = 0
+    Terrain.WaterWaveSpeed = 0
+    Terrain.WaterReflectance = 0
+    Terrain.WaterTransparency = 0
+    Lighting.GlobalShadows = false
+    Lighting.FogEnd = 9e9
+    Lighting.Brightness = 0
+
+    pcall(function()
+    	settings().Rendering.QualityLevel = "Level01"
+    end)
+    
+    for _, v in pairs(Workspace:GetDescendants()) do
+        if v:IsA("Part") or v:IsA("MeshPart") or v:IsA("CornerWedgePart") or v:IsA("TrussPart") then
+           v.Material = "Plastic"
+            v.Reflectance = 0
+        elseif v:IsA("Decal") then
+            v.Transparency = 1
+        elseif v:IsA("ParticleEmitter") or v:IsA("Trail") then
+            v.Lifetime = NumberRange.new(0)
+        elseif v:IsA("Explosion") then
+            v.BlastPressure = 1
+            v.BlastRadius = 1
+        end
+    end
+
+    for _, v in pairs(Lighting:GetChildren()) do
+        if v:IsA("BlurEffect") or v:IsA("SunRaysEffect") or v:IsA("ColorCorrectionEffect") or v:IsA("BloomEffect") or v:IsA("DepthOfFieldEffect") then
+            v.Enabled = false
+        end
+    end
+
+    Modules.TeamChooseUI.Hide()
+    task.wait(0.5)
+
+    while Hum == nil do
+        task.wait(0.1)
+    end
+
+    local InvTable = {
+        "https://autorob.xyz/invite",
+        "https://discord.gg/autorob",
+        "Made by marrymefayy & mysiwn"
+    }
+
+    local ChatTable = {
+        "autorob.xyz --> Best Jailbreak CrateFarm",
+        "autorob.xyz --> $400k+/hr JB Cash Auto Farm",
+        ".gg/autorob --> Easy & quick money",
+        ".gg/autorob --> Best Auto Farm by fayy & mysiwn",
+    }
+
+    task.spawn(function()
+        while task.wait(0.5) do
+            pcall(function()
+                MoneyMade = Player:WaitForChild("leaderstats"):WaitForChild("Money").Value - getgenv().StartingMoney
+            end)
+            pcall(function()
+                RunTime = os.time() - getgenv().StartingTime
+            end)
+            stats.Text = "Money Made: $" .. FormatCash(MoneyMade) .. "    Time Elapsed: " .. TickToHM(RunTime)
+            invite.Text = "Estimated Hourly Earnings: $" .. FormatCash(math.round((3600 / RunTime) * MoneyMade))
+        end
+    end)
+
+    SetStat("Rendering workspace..")
+
+    task.delay(300, function()
+    SetStat("Joining to different server..")
+        Teleport()
+    end)
+
+    task.spawn(function()
+        repeat task.wait() until IsArrested()
+        SetStat("Joining to different server..")
+        Teleport()
+    end)
+
+    Hum.Died:Connect(function()
+    SetStat("Joining to different server..")
+        Teleport()
+    end)
+
+    IsLoaded = true
+    
+    local TimeCooldown = os.clock()
+    local RobbedShip = false
+
+    for x = -1529, 1567, 255 do
+        if GetClosestAirdrop() == nil then
+            for z = -5179, 717, 255 do
+                Camera.CameraType = Enum.CameraType.Scriptable
+                Camera.CFrame = CFrame.new(x, 10, z)
+                task.wait()
+            end
+        end
+    end
+            
+    Camera.CameraType = Enum.CameraType.Custom
+    local Drop = GetClosestAirdrop()
+
+    if IsShipOpen() then
+        RobbedShip = true
+        pcall(RobCargoShip)
+    end
+
+    if Drop then
+        local SafeAmt = #Modules.Store._state.safesInventoryItems
+        
+        if SafeAmt ~= 0 then
+            task.spawn(function()
+                for i = 1, SafeAmt do
+                    local CurrentSafe = Modules.Store._state.safesInventoryItems[1]
+                
+                    ReplicatedStorage[Modules.SafeConsts.SAFE_OPEN_REMOTE_NAME]:FireServer(CurrentSafe.itemOwnedId)
+                    task.wait(3)
+                end
+            end)
+        end
+        
+        if os.clock() - TimeCooldown >= 18 then
+            SetStat("Cooldown finished..")
+        else
+            SetStat("Waiting for cooldown.. (" .. tostring(os.clock() - TimeCooldown) .. ")")
+
+            repeat task.wait() 
+                SetStat("Waiting for cooldown.. (" .. tostring(math.round(os.clock() - TimeCooldown) - 18):gsub("-", "") .. ")")
+            until os.clock() - TimeCooldown >= 18 or not GetClosestAirdrop()
+        end
+        
+        if GetClosestAirdrop() then
+        	pcall(RobAirDrop, Drop)
+        end
+    end
+
+    if IsShipOpen() and not RobbedShip then
+        pcall(RobCargoShip)
+    end
+
+    if IsMansionOpen() then
+        warn(pcall(robMansion))
+    end
+
+    WaitForReward()
+    SetStat("Joining to different server..")
+
+    Teleport()
